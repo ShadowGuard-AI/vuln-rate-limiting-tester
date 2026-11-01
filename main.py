@@ -41,8 +41,9 @@ class RateLimitTester:
             requests.Response: The response object.  None if an exception occurred.
         """
         try:
+            # No raise_for_status: 429 and 503 responses are the evidence this
+            # tool exists to count, so they are returned as first class results.
             response = self.session.get(self.url, timeout=self.timeout)
-            response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
             return response
         except requests.exceptions.RequestException as e:
             logging.error(f"Request failed: {e}")
@@ -59,7 +60,7 @@ class RateLimitTester:
             dict: A dictionary containing rate limiting information or None if
                   the response is invalid.
         """
-        if not response:
+        if response is None:
             return None
 
         rate_limit_info = {}
@@ -86,7 +87,7 @@ class RateLimitTester:
 
         for i in range(self.max_requests):
             response = self.send_request()
-            if response:
+            if response is not None:
                 responses.append(self.analyze_response(response))
                 if i % 10 == 0:
                     logging.info(f"Sent {i+1} requests")
@@ -191,6 +192,12 @@ def main():
         # Input validation: check if the URL starts with http/https
         if not args.url.startswith(("http://", "https://")):
             raise ValueError("URL must start with http:// or https://")
+        if args.requests_per_second <= 0:
+            logging.error("Invalid input: requests per second must be a positive integer.")
+            sys.exit(1)
+        if args.max_requests < 1:
+            logging.error("Invalid input: max requests must be at least 1.")
+            sys.exit(1)
 
         tester = RateLimitTester(
             args.url,
@@ -200,6 +207,9 @@ def main():
             args.user_agent
         )
         responses = tester.test_rate_limiting()
+        if not responses or all(result is None for result in responses):
+            logging.error("No response was received from the target. Result is inconclusive; no rate limiting verdict can be given.")
+            sys.exit(1)
         tester.report_results(responses)
 
     except ValueError as e:
