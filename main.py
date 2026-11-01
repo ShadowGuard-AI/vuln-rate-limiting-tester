@@ -29,6 +29,9 @@ class RateLimitTester:
         self.max_requests = max_requests
         self.timeout = timeout
         self.user_agent = user_agent if user_agent else "vuln-Rate-Limiting-Tester/1.0" # Default User-Agent
+        # One session for the whole run, so cookies the target sets early
+        # ride on later requests. A limiter keyed on a session cookie is
+        # therefore measured with that cookie, never from a clean state.
         self.session = requests.Session() # Use a session for connection pooling
         self.session.headers.update({"User-Agent": self.user_agent})
 
@@ -72,6 +75,9 @@ class RateLimitTester:
         rate_limit_info['x_ratelimit_remaining'] = headers.get('X-RateLimit-Remaining')
         rate_limit_info['x_ratelimit_reset'] = headers.get('X-RateLimit-Reset')
         rate_limit_info['retry_after'] = headers.get('Retry-After')
+        # Header values stay as the strings the server sent. Nothing here
+        # converts or compares them, so a falling X-RateLimit-Remaining is
+        # visible in the printed report but never drives the verdict.
         rate_limit_info['content_length'] = headers.get('Content-Length') # Useful for identifying cache hits
 
         return rate_limit_info
@@ -95,7 +101,10 @@ class RateLimitTester:
                 logging.warning("Request failed, skipping analysis.")
                 responses.append(None)
 
-            # Enforce the requests per second limit
+            # Pacing runs on an absolute schedule from the start, not a
+            # fixed pause after each request. A slow response eats into
+            # the next slot, and once I am behind schedule the following
+            # requests go out back to back until the schedule catches up.
             elapsed_time = time.time() - start_time
             sleep_time = (i + 1) / self.requests_per_second - elapsed_time
             if sleep_time > 0:
@@ -130,6 +139,9 @@ class RateLimitTester:
             for key, value in result.items():
                 print(f"  {key}: {value}")
 
+            # 503 counts as blocked alongside 429. A 503 can also be plain
+            # overload or maintenance, so this count is a pointer to look,
+            # not proof the server was rate limiting.
             if result['status_code'] in [429, 503]: # Common rate limit error codes
                 blocked_count += 1
 
