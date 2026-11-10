@@ -204,6 +204,23 @@ def main():
         # Input validation: check if the URL starts with http/https
         if not args.url.startswith(("http://", "https://")):
             raise ValueError("URL must start with http:// or https://")
+        # The URL must also name a host with a usable port, and the
+        # timeout must be positive. Before this, a URL such as
+        # http://:99999/ failed separately on every request, and a
+        # timeout of 0 or below was only caught by the HTTP library
+        # after the test had already started, reported as a generic
+        # invalid input error from that library.
+        from urllib.parse import urlparse
+        try:
+            parsed_url = urlparse(args.url)
+            _ = parsed_url.port
+        except ValueError:
+            raise ValueError("URL has an invalid port")
+        if not parsed_url.hostname:
+            raise ValueError("URL must name a host")
+        if args.timeout <= 0:
+            logging.error("Invalid input: timeout must be a positive value.")
+            sys.exit(1)
         if args.requests_per_second <= 0:
             logging.error("Invalid input: requests per second must be a positive integer.")
             sys.exit(1)
